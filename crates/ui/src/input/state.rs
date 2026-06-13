@@ -1791,6 +1791,14 @@ impl InputState {
         self.scroll_handle.offset()
     }
 
+    /// Set the scroll offset of the editor viewport. The offset is applied after
+    /// the next layout (via the deferred scroll offset the element consumes), so
+    /// it can be restored on a freshly-created editor before its first paint.
+    pub fn set_scroll_offset(&mut self, offset: gpui::Point<gpui::Pixels>, cx: &mut Context<Self>) {
+        self.deferred_scroll_offset = Some(offset);
+        cx.notify();
+    }
+
     /// Laid-out line height; `None` before first layout.
     pub fn line_height(&self) -> Option<gpui::Pixels> {
         self.last_layout.as_ref().map(|l| l.line_height)
