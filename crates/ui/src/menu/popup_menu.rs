@@ -1086,14 +1086,14 @@ impl PopupMenu {
 
         let selected = self.selected_index == Some(ix);
         const EDGE_PADDING: Pixels = px(4.);
-        const INNER_PADDING: Pixels = px(8.);
+        const INNER_PADDING: Pixels = px(12.);
 
         let is_submenu = matches!(item, PopupMenuItem::Submenu { .. });
         let group_name = format!("{}:item-{}", cx.entity().entity_id(), ix);
 
         let (item_height, radius) = match self.size {
-            Size::Small => (px(20.), options.radius.half()),
-            _ => (px(26.), options.radius),
+            Size::Small => (px(26.), options.radius.half()),
+            _ => (px(32.), options.radius),
         };
 
         let this = MenuItemElement::new(ix, &group_name)
@@ -1328,7 +1328,7 @@ impl Render for PopupMenu {
             .child(
                 v_flex()
                     .id("items")
-                    .p_1()
+                    .p_1p5()
                     .gap_y_0p5()
                     .min_w(rems(8.))
                     .when_some(self.min_width, |this, min_width| this.min_w(min_width))
