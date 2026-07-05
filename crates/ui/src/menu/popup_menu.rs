@@ -1045,10 +1045,13 @@ impl PopupMenu {
     }
 
     /// Calculate the anchor corner and left offset for child submenu
-    fn update_submenu_menu_anchor(&mut self, window: &Window) {
+    fn update_submenu_menu_anchor(&mut self, window: &Window, cx: &App) {
         let bounds = self.bounds;
         let max_width = self.max_width();
-        let (anchor, left) = if max_width + bounds.origin.x > window.bounds().size.width {
+        let parent_side = self.parent_side(cx);
+        let (anchor, left) = if parent_side == Side::Right {
+            (Anchor::TopRight, -px(16.))
+        } else if max_width + bounds.origin.x > window.bounds().size.width {
             (Anchor::TopRight, -px(16.))
         } else {
             (Anchor::TopLeft, bounds.size.width - px(8.))
@@ -1282,7 +1285,7 @@ struct RenderOptions {
 
 impl Render for PopupMenu {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.update_submenu_menu_anchor(window);
+        self.update_submenu_menu_anchor(window, cx);
 
         let view = cx.entity().clone();
         let items_count = self.menu_items.len();
