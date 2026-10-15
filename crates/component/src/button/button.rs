@@ -615,6 +615,7 @@ impl RenderOnce for Button {
         let loading = self.loading;
         let tooltip_placement = self.tooltip_placement;
         let tooltip_show_delay = self.tooltip_show_delay;
+        let tooltip_id = self.id.clone();
         let hover_group = self.hover_group;
         let hover_group_held = self.hover_group_held;
         let mut base = self.base;
@@ -869,14 +870,20 @@ impl RenderOnce for Button {
         .map(|this| {
             if let Some(builder) = self.tooltip_builder {
                 this.managed_tooltip_with(
+                    tooltip_id,
                     tooltip_placement,
                     tooltip_show_delay,
+                    window,
+                    cx,
                     move |window, cx| builder(window, cx),
                 )
             } else if let Some((tooltip, action)) = self.tooltip {
                 this.managed_tooltip_with(
+                    tooltip_id,
                     tooltip_placement,
                     tooltip_show_delay,
+                    window,
+                    cx,
                     move |window, cx| {
                         Tooltip::new(tooltip.clone())
                             .when_some(action.clone(), |this, (action, context)| {

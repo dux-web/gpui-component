@@ -391,9 +391,13 @@ impl SidebarItem for SidebarMenuItem {
                     })
                     .map(|this| {
                         if let Some(tooltip) = collapsed_tooltip {
-                            this.managed_tooltip_at(Placement::Right, move |window, cx| {
-                                Tooltip::new(tooltip.clone()).build(window, cx)
-                            })
+                            this.managed_tooltip_at(
+                                id.clone(),
+                                Placement::Right,
+                                window,
+                                cx,
+                                move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx),
+                            )
                         } else {
                             this
                         }

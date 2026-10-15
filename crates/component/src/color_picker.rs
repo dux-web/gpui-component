@@ -821,6 +821,7 @@ impl RenderOnce for ColorPickerButton {
         }
 
         let has_icon = self.icon.is_some();
+        let tooltip_id = self.id.clone();
         h_flex()
             .id(self.id)
             .gap_2()
@@ -841,7 +842,7 @@ impl RenderOnce for ColorPickerButton {
                                 .when(self.selected, |this| this.border_2())
                         })
                         .when_some(self.tooltip, |this, tooltip| {
-                            this.managed_tooltip(move |window, cx| {
+                            this.managed_tooltip(tooltip_id, window, cx, move |window, cx| {
                                 Tooltip::new(tooltip.clone()).build(window, cx)
                             })
                         }),

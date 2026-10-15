@@ -2,9 +2,9 @@ use crate::root::WindowState;
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 use gpui::{
-    Action, AnyElement, AnyView, App, AppContext, Bounds, Context, ElementId, IntoElement,
-    MouseButton, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement,
-    StyleRefinement, Styled, Window, div, prelude::FluentBuilder, px,
+    Action, AnyElement, AnyView, App, AppContext, Bounds, Context, ElementId, EntityId,
+    IntoElement, MouseButton, ParentElement, Pixels, Render, SharedString,
+    StatefulInteractiveElement, StyleRefinement, Styled, Window, div, prelude::FluentBuilder, px,
 };
 pub use gpui_base::TooltipDefaults;
 use gpui_base::{
@@ -206,12 +206,20 @@ pub(crate) struct ComponentTooltip {
 
 impl ComponentTooltip {
     /// Apply this tooltip to a `Stateful<Div>` (or any `ManagedTooltipExt` element).
-    pub fn apply<E: ManagedTooltipExt>(self, el: E) -> E {
+    pub fn apply<E: ManagedTooltipExt>(
+        self,
+        id: ElementId,
+        el: E,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> E {
         let show_delay = self.show_delay;
         if let Some(builder) = self.builder {
-            el.managed_tooltip_with(None, show_delay, move |window, cx| builder(window, cx))
+            el.managed_tooltip_with(id, None, show_delay, window, cx, move |window, cx| {
+                builder(window, cx)
+            })
         } else if let Some((text, action)) = self.text {
-            el.managed_tooltip_with(None, show_delay, move |window, cx| {
+            el.managed_tooltip_with(id, None, show_delay, window, cx, move |window, cx| {
                 Tooltip::new(text.clone())
                     .when_some(action.clone(), |this, (action, context)| {
                         this.action(
@@ -229,30 +237,72 @@ impl ComponentTooltip {
 
 // ── Internal managed tooltip trait ──────────────────────────────────────────
 
+#[derive(Default)]
+struct ManagedTooltipTrigger {
+    observes_release: bool,
+}
+
+fn managed_trigger(id: ElementId, window: &mut Window, cx: &mut App) -> EntityId {
+    let trigger = window.use_keyed_state(id, cx, |_, _| ManagedTooltipTrigger::default());
+    let trigger_id = trigger.entity_id();
+    let should_observe = trigger.update(cx, |trigger, _| {
+        if trigger.observes_release {
+            false
+        } else {
+            trigger.observes_release = true;
+            true
+        }
+    });
+
+    if should_observe {
+        window
+            .observe_release(&trigger, cx, move |_, window, cx| {
+                if let Some(overlay) = WindowState::tooltip_overlay(window, cx) {
+                    overlay.update(cx, |overlay, cx| {
+                        overlay.hide_trigger(trigger_id, cx);
+                    });
+                }
+            })
+            .detach();
+    }
+
+    trigger_id
+}
+
 pub(crate) trait ManagedTooltipExt:
     StatefulInteractiveElement + crate::ElementExt + Sized
 {
     fn managed_tooltip(
         self,
+        id: impl Into<ElementId>,
+        window: &mut Window,
+        cx: &mut App,
         build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
     ) -> Self {
-        self.managed_tooltip_with(None, None, build_tooltip)
+        self.managed_tooltip_with(id.into(), None, None, window, cx, build_tooltip)
     }
 
     fn managed_tooltip_at(
         self,
+        id: impl Into<ElementId>,
         placement: Placement,
+        window: &mut Window,
+        cx: &mut App,
         build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
     ) -> Self {
-        self.managed_tooltip_with(Some(placement), None, build_tooltip)
+        self.managed_tooltip_with(id.into(), Some(placement), None, window, cx, build_tooltip)
     }
 
     fn managed_tooltip_with(
         self,
+        id: ElementId,
         preferred_placement: Option<Placement>,
         show_delay: Option<Duration>,
+        window: &mut Window,
+        cx: &mut App,
         build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
     ) -> Self {
+        let trigger_id = managed_trigger(id, window, cx);
         let build_tooltip = Rc::new(build_tooltip);
         let trigger_bounds_cell: Rc<Cell<Bounds<Pixels>>> = Rc::new(Cell::new(Bounds::default()));
         let bounds_writer = trigger_bounds_cell.clone();
@@ -271,7 +321,8 @@ pub(crate) trait ManagedTooltipExt:
                             let build = build_tooltip.clone();
                             let request = BaseTooltipRequest::new(bounds, move |window, cx| {
                                 build(window, cx)
-                            });
+                            })
+                            .with_trigger(trigger_id);
                             let request = match preferred_placement {
                                 Some(placement) => request.with_placement(placement),
                                 None => request,

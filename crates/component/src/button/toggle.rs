@@ -155,8 +155,9 @@ impl Styled for Toggle {
 }
 
 impl RenderOnce for Toggle {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let checked = self.checked;
+        let tooltip_id = self.id.clone();
         let disabled = self.disabled;
         let hoverable = !disabled && !checked;
         let rounding = cx.theme().radius;
@@ -221,7 +222,7 @@ impl RenderOnce for Toggle {
             })
             .refine_style(&self.style)
             .children(self.children)
-            .map(|this| self.tooltip.apply(this))
+            .map(|this| self.tooltip.apply(tooltip_id, this, window, cx))
     }
 }
 

@@ -1,13 +1,13 @@
 use std::{rc::Rc, time::Duration};
 
 use gpui::{
-    AnyElement, AnyView, App, Bounds, Context, Div, ElementId, Global, InteractiveElement,
-    IntoElement, ParentElement, Pixels, Render, RenderOnce, Role, Stateful,
+    AnyElement, AnyView, App, Bounds, Context, Div, ElementId, EntityId, Global,
+    InteractiveElement, IntoElement, ParentElement, Pixels, Render, RenderOnce, Role, Stateful,
     StatefulInteractiveElement, Styled, Task, Window, deferred, div, prelude::FluentBuilder as _,
     px,
 };
 
-use crate::{Placement, Positioner};
+use crate::{Placement, Positioner, TestSupportExt as _};
 
 const TOOLTIP_PRIORITY: usize = 200;
 const WINDOW_MARGIN: Pixels = px(4.);
@@ -46,7 +46,7 @@ impl ParentElement for Tooltip {
 
 impl RenderOnce for Tooltip {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        self.base
+        self.base.test_support()
     }
 }
 
@@ -118,6 +118,7 @@ impl Default for TooltipDefaults {
 pub struct TooltipRequest {
     build: TooltipBuilder,
     trigger_bounds: Bounds<Pixels>,
+    trigger: Option<EntityId>,
     preferred_placement: Option<Placement>,
     show_delay: Option<Duration>,
 }
@@ -130,6 +131,7 @@ impl TooltipRequest {
         Self {
             build: Rc::new(build),
             trigger_bounds,
+            trigger: None,
             preferred_placement: None,
             show_delay: None,
         }
@@ -138,6 +140,16 @@ impl TooltipRequest {
     /// Prefers a side for the tooltip, falling back when it does not fit.
     pub fn with_placement(mut self, placement: Placement) -> Self {
         self.preferred_placement = Some(placement);
+        self
+    }
+
+    /// Associates this request with the rendered entity that owns its trigger.
+    ///
+    /// Component libraries can use this to dismiss the request when GPUI
+    /// releases the trigger between frames.
+    #[doc(hidden)]
+    pub fn with_trigger(mut self, trigger: EntityId) -> Self {
+        self.trigger = Some(trigger);
         self
     }
 
@@ -179,6 +191,7 @@ pub struct TooltipOverlay {
     animation_epoch: usize,
     is_switching: bool,
     show_task: Option<Task<()>>,
+    pending_trigger: Option<EntityId>,
     hide_task: Option<Task<()>>,
     renderer: TooltipRenderer,
 }
@@ -194,6 +207,7 @@ impl TooltipOverlay {
             animation_epoch: 0,
             is_switching: false,
             show_task: None,
+            pending_trigger: None,
             hide_task: None,
             renderer: Rc::new(|view, _, _, _| div().child(view).into_any_element()),
         }
@@ -232,6 +246,7 @@ impl TooltipOverlay {
             self.previous_bounds = self.content.as_ref().map(|content| content.trigger_bounds);
             self.content = Some(content);
             self.show_task = None;
+            self.pending_trigger = None;
             self.is_switching = was_visible;
             self.animation_epoch += 1;
             cx.notify();
@@ -239,12 +254,14 @@ impl TooltipOverlay {
         }
 
         let epoch = self.next_epoch();
+        self.pending_trigger = content.trigger;
         self.show_task = Some(cx.spawn_in(window, async move |this, cx| {
             cx.background_executor().timer(show_delay).await;
             let _ = this.update_in(cx, |this, _, cx| {
                 if this.epoch == epoch {
                     this.content = Some(content);
                     this.previous_bounds = None;
+                    this.pending_trigger = None;
                     this.is_switching = false;
                     this.animation_epoch += 1;
                     cx.notify();
@@ -255,6 +272,7 @@ impl TooltipOverlay {
 
     pub fn request_hide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.show_task = None;
+        self.pending_trigger = None;
         if self.content.is_none() {
             return;
         }
@@ -279,15 +297,29 @@ impl TooltipOverlay {
             || self.previous_bounds.is_some()
             || self.had_recent_tooltip
             || self.show_task.is_some()
+            || self.pending_trigger.is_some()
             || self.hide_task.is_some();
         self.content = None;
         self.previous_bounds = None;
         self.had_recent_tooltip = false;
         self.is_switching = false;
         self.show_task = None;
+        self.pending_trigger = None;
         self.hide_task = None;
         if changed {
             cx.notify();
+        }
+    }
+
+    /// Hides a request only when it belongs to the released trigger.
+    #[doc(hidden)]
+    pub fn hide_trigger(&mut self, trigger: EntityId, cx: &mut Context<Self>) {
+        let owns_content = self
+            .content
+            .as_ref()
+            .is_some_and(|content| content.trigger == Some(trigger));
+        if owns_content || self.pending_trigger == Some(trigger) {
+            self.hide(cx);
         }
     }
 }
@@ -427,6 +459,74 @@ mod tests {
                 assert!(tooltip.show_task.is_none());
             });
         });
+    }
+
+    #[gpui::test]
+    fn release_hides_only_matching_trigger(cx: &mut gpui::TestAppContext) {
+        let (first, second, state) = cx.update(|cx| {
+            TooltipDefaults::new()
+                .with_show_delay(Duration::ZERO)
+                .install(cx);
+            (
+                cx.new(|_| ()).entity_id(),
+                cx.new(|_| ()).entity_id(),
+                cx.new(|_| TooltipOverlay::new()),
+            )
+        });
+        let cx = cx.add_empty_window();
+        let request = |trigger| {
+            TooltipRequest::new(bounds(0., 0., 20., 20.), |_, _| {
+                panic!("content is not rendered by this lifecycle test")
+            })
+            .with_trigger(trigger)
+        };
+
+        cx.update(|window, cx| {
+            state.update(cx, |tooltip, cx| {
+                tooltip.request_show(request(first), window, cx);
+                tooltip.request_show(request(second), window, cx);
+                tooltip.hide_trigger(first, cx);
+                assert_eq!(
+                    tooltip.content.as_ref().and_then(|content| content.trigger),
+                    Some(second)
+                );
+                tooltip.hide_trigger(second, cx);
+                assert!(tooltip.content.is_none());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn release_cancels_pending_show(cx: &mut gpui::TestAppContext) {
+        let (trigger, state) = cx.update(|cx| {
+            TooltipDefaults::new()
+                .with_show_delay(Duration::from_millis(100))
+                .install(cx);
+            (
+                cx.new(|_| ()).entity_id(),
+                cx.new(|_| TooltipOverlay::new()),
+            )
+        });
+        let cx = cx.add_empty_window();
+        cx.update(|window, cx| {
+            state.update(cx, |tooltip, cx| {
+                tooltip.request_show(
+                    TooltipRequest::new(bounds(0., 0., 20., 20.), |_, _| {
+                        panic!("cancelled content must not render")
+                    })
+                    .with_trigger(trigger),
+                    window,
+                    cx,
+                );
+                assert_eq!(tooltip.pending_trigger, Some(trigger));
+                tooltip.hide_trigger(trigger, cx);
+                assert!(tooltip.show_task.is_none());
+                assert!(tooltip.pending_trigger.is_none());
+            });
+        });
+        cx.executor().advance_clock(Duration::from_millis(100));
+        cx.run_until_parked();
+        cx.update(|_, cx| assert!(state.read(cx).content.is_none()));
     }
 
     #[test]

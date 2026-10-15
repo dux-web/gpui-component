@@ -8,7 +8,10 @@ use gpui_component::{
     progress::{Progress, ProgressCircle},
 };
 use gpui_kit::test::{TestSupportExt, TestWindowExt};
-use gpui_kit::{AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size};
+use gpui_kit::{
+    AppContext, Context, Entity, TestAppContext, Window, WindowHandle, div, prelude::*, px, size,
+};
+use std::time::Duration;
 
 struct Controls {
     input: Entity<InputState>,
@@ -289,4 +292,152 @@ fn title_bar_and_window_controls_are_observable(cx: &mut TestAppContext) {
         }
     })
     .unwrap();
+}
+
+mod managed_tooltip_lifecycle {
+    use super::*;
+
+    struct TooltipHost {
+        show_a: bool,
+        show_b: bool,
+        revision: usize,
+        delay: Duration,
+    }
+
+    impl Render for TooltipHost {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .flex()
+                .gap_4()
+                .child(self.revision.to_string())
+                .when(self.show_a, |this| {
+                    this.child(
+                        Button::new("tooltip-a")
+                            .label("A")
+                            .tooltip("First")
+                            .tooltip_show_delay(self.delay),
+                    )
+                })
+                .when(self.show_b, |this| {
+                    this.child(
+                        Button::new("tooltip-b")
+                            .label("B")
+                            .tooltip("Second")
+                            .tooltip_show_delay(self.delay),
+                    )
+                })
+        }
+    }
+
+    fn open(
+        cx: &mut TestAppContext,
+        show_b: bool,
+        delay: Duration,
+    ) -> (WindowHandle<gpui_kit::base::Root>, Entity<TooltipHost>) {
+        cx.update(gpui_component::init);
+        common::open_window(cx, Some(size(px(600.), px(400.))), |_, cx| {
+            cx.new(|_| TooltipHost {
+                show_a: true,
+                show_b,
+                revision: 0,
+                delay,
+            })
+        })
+    }
+
+    fn render(handle: WindowHandle<gpui_kit::base::Root>, cx: &mut TestAppContext) {
+        cx.update_window(handle.into(), |_, window, cx| window.render_frame(cx))
+            .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn removal_hides_visible_tooltip(cx: &mut TestAppContext) {
+        let (handle, host) = open(cx, false, Duration::ZERO);
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.hover("tooltip-a", cx);
+            window.render_frame(cx);
+            assert!(window.find("tooltip-popup").visible());
+        })
+        .unwrap();
+
+        common::update_content(handle, &host, cx, |host, _, cx| {
+            host.revision += 1;
+            cx.notify();
+        })
+        .unwrap();
+        render(handle, cx);
+        assert!(
+            cx.update_window(handle.into(), |_, window, _| {
+                window.find("tooltip-popup").visible()
+            })
+            .unwrap()
+        );
+
+        common::update_content(handle, &host, cx, |host, _, cx| {
+            host.show_a = false;
+            cx.notify();
+        })
+        .unwrap();
+        render(handle, cx);
+        render(handle, cx);
+        cx.update_window(handle.into(), |_, window, _| {
+            assert!(window.try_find("tooltip-popup").is_none());
+        })
+        .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn removal_cancels_pending_tooltip(cx: &mut TestAppContext) {
+        let delay = Duration::from_millis(100);
+        let (handle, host) = open(cx, false, delay);
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.hover("tooltip-a", cx);
+            assert!(window.try_find("tooltip-popup").is_none());
+        })
+        .unwrap();
+
+        common::update_content(handle, &host, cx, |host, _, cx| {
+            host.show_a = false;
+            cx.notify();
+        })
+        .unwrap();
+        render(handle, cx);
+        render(handle, cx);
+        cx.executor().advance_clock(delay);
+        cx.run_until_parked();
+        render(handle, cx);
+        cx.update_window(handle.into(), |_, window, _| {
+            assert!(window.try_find("tooltip-popup").is_none());
+        })
+        .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn old_release_preserves_current_tooltip(cx: &mut TestAppContext) {
+        let (handle, host) = open(cx, true, Duration::ZERO);
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.hover("tooltip-a", cx);
+            window.render_frame(cx);
+            window.hover("tooltip-b", cx);
+            window.render_frame(cx);
+            assert!(window.find("tooltip-popup").visible());
+        })
+        .unwrap();
+
+        common::update_content(handle, &host, cx, |host, _, cx| {
+            host.show_a = false;
+            cx.notify();
+        })
+        .unwrap();
+        render(handle, cx);
+        render(handle, cx);
+        cx.update_window(handle.into(), |_, window, _| {
+            assert!(window.find("tooltip-popup").visible());
+        })
+        .unwrap();
+    }
 }

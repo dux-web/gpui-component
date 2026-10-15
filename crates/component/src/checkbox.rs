@@ -233,6 +233,7 @@ impl RenderOnce for Checkbox {
 
         let base = self.base;
         let children = self.children;
+        let tooltip_id = self.id.clone();
         let accessibility_label = self
             .accessibility_label
             .or_else(|| self.label.as_ref().map(|label| label.get_text(cx)));
@@ -356,7 +357,7 @@ impl RenderOnce for Checkbox {
                 // not move focus, including while disabled.
                 window.prevent_default();
             })
-            .map(|this| self.tooltip.apply(this))
+            .map(|this| self.tooltip.apply(tooltip_id, this, window, cx))
     }
 }
 

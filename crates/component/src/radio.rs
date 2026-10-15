@@ -172,6 +172,7 @@ impl ParentElement for Radio {
 impl RenderOnce for Radio {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let checked = self.checked;
+        let tooltip_id = self.id.clone();
         let has_content = self.label.is_some() || !self.children.is_empty();
         let indicator_size = rems(match self.size {
             Size::XSmall => 0.75,
@@ -276,7 +277,7 @@ impl RenderOnce for Radio {
                     on_click(&next, window, cx);
                 })
             })
-            .map(|this| self.tooltip.apply(this))
+            .map(|this| self.tooltip.apply(tooltip_id, this, window, cx))
     }
 }
 
