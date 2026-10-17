@@ -11,8 +11,8 @@ use crate::{
 };
 use gpui::{
     App, AppContext, Context, DefiniteLength, ElementId, Entity, FocusHandle, InteractiveElement,
-    IntoElement, ParentElement as _, Render, RenderOnce, Styled, WeakFocusHandle, Window, div,
-    prelude::FluentBuilder as _,
+    IntoElement, ParentElement as _, Render, RenderOnce, Styled, WeakFocusHandle, Window, deferred,
+    div, prelude::FluentBuilder as _,
 };
 use gpui_base::{TextSelection, TextSelectionScopeId};
 use std::{any::TypeId, rc::Rc};
@@ -145,15 +145,21 @@ impl WindowState {
             _ => (None, None, None, None),
         };
 
+        // Base dialogs are deferred at 10 + their layer index. Defer the whole
+        // notification stack after every dialog, including embedded Base forms.
+        let priority = 11 + root.read(cx).active_dialogs.len();
         Some(
-            div()
-                .absolute()
-                .inset_0()
-                .when_some(mt, |this, offset| this.mt(offset))
-                .when_some(mr, |this, offset| this.mr(offset))
-                .when_some(mb, |this, offset| this.mb(offset))
-                .when_some(ml, |this, offset| this.ml(offset))
-                .child(root.read(cx).notification.clone()),
+            deferred(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .when_some(mt, |this, offset| this.mt(offset))
+                    .when_some(mr, |this, offset| this.mr(offset))
+                    .when_some(mb, |this, offset| this.mb(offset))
+                    .when_some(ml, |this, offset| this.ml(offset))
+                    .child(root.read(cx).notification.clone()),
+            )
+            .with_priority(priority),
         )
     }
 
