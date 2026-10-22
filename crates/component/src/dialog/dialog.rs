@@ -1131,6 +1131,38 @@ pub(crate) mod tests {
         );
     }
 
+    #[gpui::test]
+    fn fullscreen_tracks_viewport_and_restores_underlying_focus(cx: &mut TestAppContext) {
+        let viewport = size(px(800.), px(600.));
+        let cx = window(cx, viewport);
+        open(cx, |dialog, _, _| dialog.title("Underlying").child("body"));
+        let focus = cx.update(|window, cx| {
+            WindowState::read(window, cx).active_dialogs[0]
+                .focus_handle()
+                .clone()
+        });
+        open(cx, |dialog, _, _| {
+            dialog
+                .fullscreen(true)
+                .w(px(50.))
+                .h(px(50.))
+                .max_w(px(50.))
+                .margin_top(px(200.))
+                .title("Preview")
+                .child("image")
+        });
+        assert_eq!(surface(cx, 1), Bounds::new(point(px(0.), px(0.)), viewport));
+        let resized = size(px(400.), px(300.));
+        cx.simulate_resize(resized);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(surface(cx, 1), Bounds::new(point(px(0.), px(0.)), resized));
+        cx.simulate_keystrokes("escape");
+        cx.update(|window, cx| {
+            assert_eq!(WindowState::read(window, cx).active_dialogs.len(), 1);
+            assert!(focus.is_focused(window));
+        });
+    }
+
     /// `Dialog::button_props` overrides only the fields it sets.
     #[gpui::test]
     fn dialog_button_props_merge_with_what_the_dialog_already_carries(cx: &mut TestAppContext) {
