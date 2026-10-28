@@ -207,6 +207,7 @@ pub(crate) struct DialogProps {
     margin_top: Option<Pixels>,
     centered: bool,
     close_button: bool,
+    fullscreen: bool,
 
     overlay: bool,
     overlay_closable: bool,
@@ -226,6 +227,7 @@ impl Default for DialogProps {
             keyboard: true,
             overlay_visible: false,
             close_button: true,
+            fullscreen: false,
             overlay_closable: true,
             entrance: DialogEntrance::default(),
         }
@@ -499,7 +501,7 @@ impl Dialog {
 
     /// Sets the width of the dialog, defaults to 448px.
     ///
-    /// The dialog is never wider than the viewport minus a margin on each side.
+    /// Unless fullscreen, the dialog is capped at the viewport minus an edge margin.
     ///
     /// See also [`Self::width`]
     pub fn w(mut self, width: impl Into<Pixels>) -> Self {
@@ -509,7 +511,7 @@ impl Dialog {
 
     /// Sets the width of the dialog, defaults to 448px.
     ///
-    /// The dialog is never wider than the viewport minus a margin on each side.
+    /// Unless fullscreen, the dialog is capped at the viewport minus an edge margin.
     pub fn width(mut self, width: impl Into<Pixels>) -> Self {
         self.props.width = width.into();
         self
@@ -518,6 +520,17 @@ impl Dialog {
     /// Set the maximum width of the dialog, defaults to `None`.
     pub fn max_w(mut self, max_width: impl Into<Pixels>) -> Self {
         self.props.max_width = Some(max_width.into());
+        self
+    }
+
+    /// Fill the client viewport without an inset, border, corner radius, or shadow.
+    ///
+    /// Defaults to `false`. When enabled, width, height, maximum width, centering,
+    /// top margin, and stacked offsets do not constrain the surface. Content
+    /// padding and focus, keyboard, and dismissal behavior remain unchanged.
+    /// This does not change the operating system's window mode.
+    pub fn fullscreen(mut self, fullscreen: bool) -> Self {
+        self.props.fullscreen = fullscreen;
         self
     }
 
@@ -664,9 +677,20 @@ impl RenderOnce for Dialog {
         // the window. A dialog that fits keeps `margin_top` (a tenth of the
         // viewport by default); an overflowing one is snapped up to this edge
         // margin so that the preferred offset does not waste usable height.
-        let margin = cx.theme().spacing_tokens().lg;
-        let layer_offset = px(layer_ix as f32 * 16.);
-        let (anchor, y) = if self.props.centered {
+        let fullscreen = self.props.fullscreen;
+        let margin = if fullscreen {
+            px(0.)
+        } else {
+            cx.theme().spacing_tokens().lg
+        };
+        let layer_offset = if fullscreen {
+            px(0.)
+        } else {
+            px(layer_ix as f32 * 16.)
+        };
+        let (anchor, y) = if fullscreen {
+            (Anchor::TopLeft, px(0.))
+        } else if self.props.centered {
             (Anchor::LeftCenter, view_size.height / 2.)
         } else {
             let y = self.props.margin_top.unwrap_or(view_size.height / 10.);
@@ -681,10 +705,13 @@ impl RenderOnce for Dialog {
             .map_or(1.0, |motion| motion.visibility.clamp(0., 1.));
         let fade_overlay = closing && self.props.overlay_visible;
         let travel = motion.distance_short.to_pixels(window.rem_size());
-        let width = self
-            .props
-            .width
-            .min((view_size.width - margin * 2.).max(px(0.)));
+        let width = if fullscreen {
+            view_size.width
+        } else {
+            self.props
+                .width
+                .min((view_size.width - margin * 2.).max(px(0.)))
+        };
         let x = (view_size.width - width) / 2.;
         let max_height = (view_size.height - margin * 2. - layer_offset).max(px(0.));
 
@@ -788,8 +815,19 @@ impl RenderOnce for Dialog {
                                         .px_0()
                                         .occlude()
                                         .w(width)
-                                        .when_some(self.props.max_width, |this, w| this.max_w(w))
+                                        .when(!fullscreen, |this| {
+                                            this.when_some(self.props.max_width, |this, w| {
+                                                this.max_w(w)
+                                            })
+                                        })
                                         .max_h(max_height)
+                                        .when(fullscreen, |this| {
+                                            this.h(view_size.height)
+                                                .min_h_0()
+                                                .border_0()
+                                                .rounded_none()
+                                                .shadow_none()
+                                        })
                                         .child(
                                             v_flex()
                                                 .flex_1()
@@ -814,6 +852,9 @@ impl RenderOnce for Dialog {
                                                 .when_some(self.content_builder, |this, builder| {
                                                     this.child(builder(
                                                         DialogContent::new()
+                                                            .when(fullscreen, |content| {
+                                                                content.rounded_none()
+                                                            })
                                                             .gap(paddings.bottom)
                                                             .pl(paddings.left)
                                                             .pr(paddings.right),
@@ -890,10 +931,13 @@ impl RenderOnce for Dialog {
                                         // Base paints its popup in a deferred pass; the
                                         // surface must apply opacity itself.
                                         .opacity(visibility)
-                                        .shadow(dialog_shadow(visibility))
+                                        .when(!fullscreen, |surface| {
+                                            surface.shadow(dialog_shadow(visibility))
+                                        })
                                         .text_selection_scope(selection_scope)
                                         .map(|surface| {
-                                            if entrance == DialogEntrance::FadeSlide {
+                                            if !fullscreen && entrance == DialogEntrance::FadeSlide
+                                            {
                                                 let mut surface = EntranceSurface::new(
                                                     surface.into_any_element(),
                                                     travel,

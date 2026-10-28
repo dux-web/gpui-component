@@ -226,6 +226,7 @@ pub struct Diff {
     line_number: bool,
     syntax_highlight: bool,
     header_visible: bool,
+    missing_newline_visible: bool,
     hover_highlight: DiffHoverHighlight,
     hunk_separator: DiffHunkSeparator,
     change_indicator: DiffChangeIndicator,
@@ -258,6 +259,7 @@ impl Diff {
             line_number: true,
             syntax_highlight: true,
             header_visible: true,
+            missing_newline_visible: true,
             hover_highlight: DiffHoverHighlight::default(),
             hunk_separator: DiffHunkSeparator::default(),
             change_indicator: DiffChangeIndicator::default(),
@@ -287,6 +289,11 @@ impl Diff {
     /// Shows a header above each file. Default is true.
     pub fn header_visible(mut self, visible: bool) -> Self {
         self.header_visible = visible;
+        self
+    }
+    /// Shows the missing final newline label without changing source or selection. Default is true.
+    pub fn missing_newline_visible(mut self, visible: bool) -> Self {
+        self.missing_newline_visible = visible;
         self
     }
     /// Emphasizes the line, its number, or both under the pointer. Default is none.
@@ -575,6 +582,7 @@ fn render_diff(
         line_number: props.line_number,
         syntax_highlight: props.syntax_highlight,
         header_visible: props.header_visible,
+        missing_newline_visible: props.missing_newline_visible,
         hover_highlight: props.hover_highlight,
         hunk_separator: props.hunk_separator,
         change_indicator: props.change_indicator,
@@ -817,6 +825,7 @@ struct CodePresentation {
     line_number: bool,
     syntax_highlight: bool,
     header_visible: bool,
+    missing_newline_visible: bool,
     hover_highlight: DiffHoverHighlight,
     hunk_separator: DiffHunkSeparator,
     change_indicator: DiffChangeIndicator,
@@ -1893,12 +1902,7 @@ fn line_extras(
     let line = &document.lines(side)[ix];
     let ending = &document.source(side)[line.content_end()..line.source().end];
     let ending_only = changed && has_line_ending_change(document, side, ix, other_ix);
-    if ending.is_empty() || ending_only {
-        let label = if ending.is_empty() {
-            t!("Diff.NoNewline").to_string()
-        } else {
-            format!("\\ {}", if ending == "\r\n" { "CRLF" } else { "LF" })
-        };
+    if let Some(label) = line_ending_label(ending, ending_only, code.missing_newline_visible) {
         extras.push(
             div()
                 .h_6()
@@ -1911,6 +1915,14 @@ fn line_extras(
     }
     extras.extend(line_annotations(file, side, ix, code, window, cx));
     extras
+}
+
+fn line_ending_label(ending: &str, ending_only: bool, missing_visible: bool) -> Option<String> {
+    if ending.is_empty() {
+        missing_visible.then(|| t!("Diff.NoNewline").to_string())
+    } else {
+        ending_only.then(|| format!("\\ {}", if ending == "\r\n" { "CRLF" } else { "LF" }))
+    }
 }
 
 fn line_annotations(
