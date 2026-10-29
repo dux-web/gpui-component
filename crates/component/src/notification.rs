@@ -534,6 +534,7 @@ impl Render for Notification {
 
 /// The settings for notifications.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct NotificationSettings {
     /// The placement of the notifications, default: [`Anchor::TopRight`]
     ///
@@ -1011,7 +1012,7 @@ impl Render for NotificationList {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
-        let size = window.viewport_size();
+        let size = window.fully_visible_bounds().size;
         let settings = &cx.theme().notification;
         let (placement, margins, width) =
             (settings.placement, settings.margins.clone(), settings.width);
